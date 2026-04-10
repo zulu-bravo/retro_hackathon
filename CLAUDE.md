@@ -4,7 +4,35 @@
 
 A web application that captures retrospective feedback during Closing Day or ad-hoc retros, then surfaces trends over time across teams. Built as a PM assignment exercise where the goal is to stand out among ~15 teams building the same thing.
 
-The differentiator strategy: most teams will build a basic form + SQL dump. This tool wins on the **output side** — smarter insights, a team health score, and AI-powered theme clustering on top of a solid baseline.
+The differentiator strategy: most teams will build a basic form + SQL dump. This tool wins on the **output side** — smarter insights and AI-powered theme clustering on top of a solid baseline.
+
+---
+
+## Tech stack (as built)
+
+- **Framework**: Next.js 16 (App Router, TypeScript, Server Components + Server Actions)
+- **Database**: SQLite via Prisma 7 + `@prisma/adapter-better-sqlite3`
+- **Styling**: Tailwind CSS 4
+- **AI**: Anthropic SDK (`claude-haiku-4-5-20251001`) for theme classification
+- **Auth**: No real login — cookie-based "Acting as" dropdown for user identity
+
+---
+
+## Local setup
+
+```bash
+npm install
+cp .env.example .env          # set ANTHROPIC_API_KEY if you want AI themes
+npx prisma generate
+npx prisma migrate dev --name init
+npx prisma db seed
+npm run dev                    # http://localhost:3000
+```
+
+Run the 3 standalone queries:
+```bash
+sqlite3 -header -column dev.db < queries.sql
+```
 
 ---
 
@@ -13,136 +41,110 @@ The differentiator strategy: most teams will build a basic form + SQL dump. This
 - User interface to capture feedback (went well, didn't go well, action items with owner)
 - Working database with at least 3 closing day retro boards seeded with realistic data
 - 3 runnable queries that surface meaningful patterns:
-  - **Query 1** — Recurring blockers (group "didn't go well" by theme/keyword, rank by frequency)
-  - **Query 2** — Action item completion rates (% done vs open, trend over time, by owner)
-  - **Query 3** — Team / squad comparisons (sentiment ratio, action item volume per member)
+  - **Query 1** — Recurring blockers (group "didn't go well" by theme, rank by frequency, vote-weighted)
+  - **Query 2** — Action item completion rates (% done vs open, per team)
+  - **Query 3** — Team / squad comparisons (sentiment ratio: went_well / didn't_go_well)
 
 ---
 
-## Database schema
+## Database schema (Prisma)
 
-6 tables. Use PostgreSQL or SQLite.
+6 tables, UUID primary keys. Defined in `prisma/schema.prisma`.
+Tables use `@@map` to keep snake_case names so raw SQL in `queries.sql` matches the ERD.
 
-```sql
-teams
-  id            uuid PK
-  name          text
-  squad_type    text
-  created_at    timestamp
-
-users
-  id            uuid PK
-  team_id       uuid FK → teams.id
-  name          text
-  email         text
-  role          text          -- 'facilitator' | 'member'
-  created_at    timestamp
-
-retro_boards
-  id            uuid PK
-  team_id       uuid FK → teams.id
-  facilitator_id uuid FK → users.id
-  title         text
-  release_tag   text          -- free-text label e.g. "Sprint 11", "v2.4", "Q3 Closing Day"
-  retro_type    text          -- 'closing_day' | 'adhoc'
-  session_date  timestamp
-  status        text          -- 'open' | 'closed'
-
-feedback_items
-  id            uuid PK
-  board_id      uuid FK → retro_boards.id
-  author_id     uuid FK → users.id
-  category      text          -- 'went_well' | 'didnt_go_well'
-  content       text
-  ai_theme      text          -- nullable; populated by Claude API clustering
-  created_at    timestamp
-
-action_items
-  id            uuid PK
-  board_id      uuid FK → retro_boards.id
-  owner_id      uuid FK → users.id
-  description   text
-  status        text          -- 'open' | 'in_progress' | 'done'
-  due_date      date
-  completed_at  timestamp     -- nullable; enables cycle time queries
-
-votes
-  id            uuid PK
-  feedback_id   uuid FK → feedback_items.id
-  user_id       uuid FK → users.id
-  created_at    timestamp
-```
+| Table | Key columns | Notes |
+|---|---|---|
+| `teams` | id, name, squad_type, created_at | |
+| `users` | id, team_id FK, name, email, role, created_at | |
+| `retro_boards` | id, team_id FK, facilitator_id FK, title, release_tag, retro_type, session_date, status | retro_type: closing_day / adhoc; status: draft / active / closed |
+| `feedback_items` | id, board_id FK, author_id FK, category, content, ai_theme, created_at | category: went_well / didnt_go_well / idea; ai_theme set by Claude API |
+| `action_items` | id, board_id FK, owner_id FK, description, status, due_date, completed_at | status: open / in_progress / done |
+| `votes` | id, feedback_id FK, user_id FK, created_at | unique(feedback_id, user_id) prevents double-votes |
 
 ### Key design decisions
-- `release_tag` is a free-text string on `retro_boards`, not a separate entity — simpler and more flexible
-- `votes` is its own table (not an integer column) — supports live voting, prevents double-votes, enables "who voted for what" queries
-- `ai_theme` is nullable from day one — column exists, stays empty until the Claude API call is wired up, no migration needed later
-- `completed_at` is a timestamp not just a status — enables cycle time calculation (how long to close an item)
+- `release_tag` is free-text on `retro_boards`, not a separate entity
+- `votes` is its own table (not an integer column) — prevents double-votes, enables "who voted for what"
+- `ai_theme` is nullable — populated by Claude API at write time; `null` if API key missing or call fails
+- `completed_at` is a timestamp not just a status — enables cycle time calculations
+- Cascade deletes on feedback_items and action_items from their parent board
 
 ---
 
-## Seed data strategy
+## Seed data
 
-**Do not seed with placeholder text.** The 3 boards should tell a story that makes the queries interesting:
+Seeded via `prisma/seed.ts` with deterministic UUIDs. Run with `npx prisma db seed`.
 
-- **Board 1 — Team Alpha, "Sprint 10 Closing Day"**: A team struggling with deployment pipeline issues. Multiple "didn't go well" items about slow CI, a failed release, and unclear ownership. Several action items marked open/overdue.
-- **Board 2 — Team Alpha, "Sprint 11 Closing Day"**: Same team, one sprint later. The CI blocker recurs but an action item from Sprint 10 was completed. Shows trend improvement.
-- **Board 3 — Team Beta, "Q3 Closing Day"**: A different squad with different blockers (communication, unclear requirements). Enables the cross-team comparison query to surface meaningful differences.
-
-This makes Query 1 (recurring blockers) immediately interesting, Query 2 (completion rates) show real progress, and Query 3 (team comparison) highlight genuine differences.
-
----
-
-## Build sequence
-
-Follow this order — each step is independently demonstrable:
-
-1. **Schema + migrations** — create all 6 tables, set up indexes on FK columns and `created_at`
-2. **Seed data** — 3 realistic retro boards with feedback and action items per the strategy above
-3. **API layer** — REST or tRPC endpoints: create board, add feedback item, add action item, cast vote, update action item status
-4. **UI — retro board** — session view with three columns (went well / didn't go well / action items), live card submission, voting
-5. **UI — dashboard** — cross-team trends view with the 3 queries rendered as charts/tables
-6. **3 runnable queries** — implement and expose the required analytics queries
-7. **AI theme clustering** *(differentiator)* — call Claude API (`claude-sonnet-4-6`) to auto-label `ai_theme` on feedback items after a board closes
+- **3 teams** across 2 squads: Pegasus + Griffin (platform), Orca (growth)
+- **9 users** (3 per team, one facilitator each)
+- **4 retro boards**: 3 closing_day + 1 adhoc
+  - Pegasus Q1.1 (closed), Griffin Q1.2 (closed), Orca Q1.3 (closed), Pegasus Hotfix (active)
+- **24 feedback items** with intentional ai_theme repetition (`tooling` appears in all 4 boards)
+- **10 action items** with mixed statuses (~60% done, 20% in_progress, 20% open)
+- **20 votes** clustered on tooling blockers to make vote-weighted ordering visible
 
 ---
 
-## Differentiators
+## The 3 trend queries
 
-These are what separate this tool from the other 14 teams:
+Stored in `queries.sql` (standalone) and `src/lib/queries.ts` (rendered on `/insights`).
 
-### 1. AI theme clustering (highest priority)
-After a board is closed, call the Anthropic API to cluster all "didn't go well" items into named themes and write the result back to `feedback_items.ai_theme`. This makes Query 1 (recurring blockers) qualitatively better — "deploy failures" as a theme is more useful than individual free-text strings.
-
-```
-POST /api/boards/:id/cluster-themes
-→ calls claude-sonnet-4-6 with all feedback content
-→ returns theme labels
-→ writes to ai_theme column
-```
-
-### 2. Team health score
-A composite score per team per sprint, displayed as a trend line:
-
-```
-health_score = (% positive feedback) - (recurring_blocker_weight) + (action_item_completion_rate)
-```
-
-Surface this in the dashboard. No other team will have a single comparable number.
-
-### 3. Realistic seed data
-See seed data strategy above. The queries should tell a story when demoed, not return empty or meaningless results.
+1. **Q1 — Recurring blockers**: Groups `didnt_go_well` items by `ai_theme`, counts mentions and distinct boards, sums votes. Only shows themes appearing in 2+ boards. Ordered by breadth then vote weight.
+2. **Q2 — Action-item completion rate**: Per team, shows total/done/in_progress/open counts and completion percentage.
+3. **Q3 — Team/squad sentiment**: Positive-to-negative feedback ratio by team, grouped by squad_type.
 
 ---
 
-## Tech stack
+## AI theme classification
 
-Keep it simple and demonstrable:
+- **File**: `src/lib/ai-theme.ts`
+- **Model**: `claude-haiku-4-5-20251001`
+- **When**: Called inside the `addFeedback` server action before inserting the feedback item
+- **Themes**: `tooling | process | communication | scope | staffing | quality | morale | other`
+- **Fallback**: If `ANTHROPIC_API_KEY` is unset or the call fails, item is saved with `ai_theme = null`
 
-- **Backend**: Node.js + Express (or Fastify), TypeScript
-- **Database**: SQLite for local dev (easy to commit and demo), PostgreSQL-compatible SQL
-- **Frontend**: React + Vite, minimal styling (Tailwind or plain CSS)
-- **Git**: Commit after each build sequence step so progress is visible in history
+---
+
+## Project structure
+
+```
+prisma/
+  schema.prisma            # 6-table data model
+  seed.ts                  # Deterministic seed data
+  migrations/              # SQLite migration
+queries.sql                # 3 standalone trend queries (run with sqlite3)
+src/
+  app/
+    page.tsx               # Dashboard — boards grouped by team
+    boards/new/page.tsx    # Create board form + server action
+    boards/[id]/page.tsx   # Board view: 3 feedback columns + voting + action items
+    insights/page.tsx      # Insights — renders Q1/Q2/Q3 as tables
+    api/users/route.ts     # User list for the acting-as dropdown
+  lib/
+    db.ts                  # PrismaClient singleton (better-sqlite3 adapter)
+    ai-theme.ts            # Claude API theme classifier
+    queries.ts             # Raw SQL queries via prisma.$queryRawUnsafe
+    acting-as.ts           # Cookie read/write for user identity
+  components/
+    ActingAsDropdown.tsx   # Top-bar user switcher (client component)
+```
+
+---
+
+## Routes / pages
+
+| Route | Type | Description |
+|---|---|---|
+| `GET /` | Server Component | Dashboard: boards grouped by team with status chips |
+| `GET /boards/new` | Server Component | Create-board form (team, title, release_tag, type, date, facilitator) |
+| `GET /boards/[id]` | Server Component | Board view with 3 feedback columns + vote buttons + action items table |
+| `GET /insights` | Server Component | Renders all 3 trend queries as tables |
+| `GET /api/users` | Route Handler | JSON list of users for the ActingAsDropdown |
+
+### Server actions (boards/[id])
+- `addFeedback` — creates feedback item, calls `classifyTheme` for ai_theme
+- `toggleVote` — insert or delete vote (unique constraint enforced)
+- `addAction` — creates action item with owner and optional due date
+- `cycleStatus` — cycles action: open → in_progress → done → open; sets `completedAt` when done
 
 ---
 
@@ -156,15 +158,25 @@ feat: add AI theme clustering via Claude API
 fix: prevent duplicate votes per user per feedback item
 ```
 
-Commit after each completed step in the build sequence. The git history should read as a coherent build story.
-
 ---
 
 ## What "done" looks like for the demo
 
-1. Open a new retro board for a team, set a `release_tag`
-2. Add 3–4 feedback items across both categories, cast a vote
-3. Add 2 action items with owners and due dates
-4. Close the board → trigger AI theme clustering
-5. Navigate to the dashboard → show all 3 queries with real data
-6. Show the team health score trend across the 3 seeded sprints
+1. Open http://localhost:3000 — dashboard shows 4 seeded boards across 3 teams
+2. Pick a user in the "Acting as" dropdown
+3. Click into a board — see 3 feedback columns with existing items and vote counts
+4. Add a "Went Well" and a "Didn't Go Well" item — ai_theme auto-classified (if API key set)
+5. Upvote a feedback item — vote count increments, filled arrow appears
+6. Add an action item with owner and due date, cycle its status to "done"
+7. Navigate to `/insights` — all 3 query tables populated with meaningful aggregates
+8. Run `sqlite3 dev.db < queries.sql` from CLI — same results, proving queries are standalone
+
+---
+
+## Future enhancements (not yet built)
+
+- **Team health score** — composite metric: `(% positive feedback) - (recurring_blocker_weight) + (action_item_completion_rate)` displayed as trend line
+- **Real auth / SSO** — replace acting-as dropdown with actual login
+- **Board close action** — explicit close button that triggers batch AI theme reclassification
+- **Charts** — visualize insights with bar/line charts instead of tables
+- **Export** — CSV/PDF export of query results
