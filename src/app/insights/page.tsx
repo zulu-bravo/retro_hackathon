@@ -117,7 +117,7 @@ export default async function InsightsPage() {
                   <th className="px-4 py-3 font-medium">Squad</th>
                   <th className="px-4 py-3 font-medium">Team</th>
                   <th className="px-4 py-3 font-medium text-right">Went Well</th>
-                  <th className="px-4 py-3 font-medium text-right">Didn&apos;t Go Well</th>
+                  <th className="px-4 py-3 font-medium text-right">To Improve</th>
                   <th className="px-4 py-3 font-medium text-right">Positive Ratio</th>
                   <th className="px-4 py-3 font-medium text-right">Boards Run</th>
                 </tr>

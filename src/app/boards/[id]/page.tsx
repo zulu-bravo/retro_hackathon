@@ -8,8 +8,7 @@ export const dynamic = "force-dynamic";
 
 const CATEGORY_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   went_well: { label: "Went Well", color: "text-green-700", bg: "bg-green-50 border-green-200" },
-  didnt_go_well: { label: "Didn't Go Well", color: "text-red-700", bg: "bg-red-50 border-red-200" },
-  idea: { label: "Ideas", color: "text-blue-700", bg: "bg-blue-50 border-blue-200" },
+  didnt_go_well: { label: "To Improve", color: "text-amber-700", bg: "bg-amber-50 border-amber-200" },
 };
 
 const ACTION_STATUS_STYLE: Record<string, string> = {
@@ -41,6 +40,10 @@ export default async function BoardPage({
         include: {
           author: true,
           votes: true,
+          comments: {
+            include: { author: true },
+            orderBy: { createdAt: "asc" },
+          },
         },
         orderBy: { createdAt: "asc" },
       },
@@ -135,6 +138,22 @@ export default async function BoardPage({
     revalidatePath(`/boards/${boardId}`);
   }
 
+  async function addComment(formData: FormData) {
+    "use server";
+    const feedbackId = formData.get("feedbackId") as string;
+    const content = formData.get("content") as string;
+    const authorId = formData.get("authorId") as string;
+    const boardId = formData.get("boardId") as string;
+
+    if (!content.trim()) return;
+
+    await prisma.comment.create({
+      data: { feedbackId, authorId, content },
+    });
+
+    revalidatePath(`/boards/${boardId}`);
+  }
+
   return (
     <div>
       {/* Header */}
@@ -152,8 +171,8 @@ export default async function BoardPage({
       </div>
 
       {/* Feedback columns */}
-      <div className="grid md:grid-cols-3 gap-6 mb-10">
-        {(["went_well", "didnt_go_well", "idea"] as const).map((cat) => {
+      <div className="grid md:grid-cols-2 gap-6 mb-10">
+        {(["went_well", "didnt_go_well"] as const).map((cat) => {
           const config = CATEGORY_CONFIG[cat];
           const items = board.feedbackItems.filter((f) => f.category === cat);
           return (
@@ -200,6 +219,35 @@ export default async function BoardPage({
                           </button>
                         </form>
                       </div>
+                      {/* Comments */}
+                      {item.comments.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-gray-100 space-y-1.5">
+                          {item.comments.map((c) => (
+                            <div key={c.id} className="text-xs text-gray-600">
+                              <span className="font-medium">{c.author.name}:</span>{" "}
+                              {c.content}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <form action={addComment} className="mt-2 flex gap-1.5">
+                        <input type="hidden" name="feedbackId" value={item.id} />
+                        <input type="hidden" name="authorId" value={actingUserId || ""} />
+                        <input type="hidden" name="boardId" value={board.id} />
+                        <input
+                          name="content"
+                          placeholder="Add a comment..."
+                          required
+                          className="flex-1 border border-gray-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!actingUserId}
+                          className="text-xs text-indigo-600 font-medium hover:text-indigo-800 disabled:opacity-40 px-1"
+                        >
+                          Reply
+                        </button>
+                      </form>
                     </div>
                   );
                 })}

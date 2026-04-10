@@ -38,7 +38,7 @@ sqlite3 -header -column dev.db < queries.sql
 
 ## Assignment requirements (non-negotiable)
 
-- User interface to capture feedback (went well, didn't go well, action items with owner)
+- User interface to capture feedback (went well, to improve, action items with owner)
 - Working database with at least 3 closing day retro boards seeded with realistic data
 - 3 runnable queries that surface meaningful patterns:
   - **Query 1** — Recurring blockers (group "didn't go well" by theme, rank by frequency, vote-weighted)
@@ -49,7 +49,7 @@ sqlite3 -header -column dev.db < queries.sql
 
 ## Database schema (Prisma)
 
-6 tables, UUID primary keys. Defined in `prisma/schema.prisma`.
+7 tables, UUID primary keys. Defined in `prisma/schema.prisma`.
 Tables use `@@map` to keep snake_case names so raw SQL in `queries.sql` matches the ERD.
 
 | Table | Key columns | Notes |
@@ -57,16 +57,18 @@ Tables use `@@map` to keep snake_case names so raw SQL in `queries.sql` matches 
 | `teams` | id, name, squad_type, created_at | |
 | `users` | id, team_id FK, name, email, role, created_at | |
 | `retro_boards` | id, team_id FK, facilitator_id FK, title, release_tag, retro_type, session_date, status | retro_type: closing_day / adhoc; status: draft / active / closed |
-| `feedback_items` | id, board_id FK, author_id FK, category, content, ai_theme, created_at | category: went_well / didnt_go_well / idea; ai_theme set by Claude API |
+| `feedback_items` | id, board_id FK, author_id FK, category, content, ai_theme, created_at | category: went_well / didnt_go_well; ai_theme set by Claude API |
 | `action_items` | id, board_id FK, owner_id FK, description, status, due_date, completed_at | status: open / in_progress / done |
 | `votes` | id, feedback_id FK, user_id FK, created_at | unique(feedback_id, user_id) prevents double-votes |
+| `comments` | id, feedback_id FK, author_id FK, content, created_at | Threaded discussion on feedback items |
 
 ### Key design decisions
 - `release_tag` is free-text on `retro_boards`, not a separate entity
 - `votes` is its own table (not an integer column) — prevents double-votes, enables "who voted for what"
 - `ai_theme` is nullable — populated by Claude API at write time; `null` if API key missing or call fails
 - `completed_at` is a timestamp not just a status — enables cycle time calculations
-- Cascade deletes on feedback_items and action_items from their parent board
+- Cascade deletes on feedback_items, action_items, and comments from their parent
+- `comments` table enables threaded discussion on individual feedback items
 
 ---
 
@@ -78,9 +80,10 @@ Seeded via `prisma/seed.ts` with deterministic UUIDs. Run with `npx prisma db se
 - **9 users** (3 per team, one facilitator each)
 - **4 retro boards**: 3 closing_day + 1 adhoc
   - Pegasus Q1.1 (closed), Griffin Q1.2 (closed), Orca Q1.3 (closed), Pegasus Hotfix (active)
-- **24 feedback items** with intentional ai_theme repetition (`tooling` appears in all 4 boards)
+- **22 feedback items** with intentional ai_theme repetition (`tooling` appears in all 4 boards)
 - **10 action items** with mixed statuses (~60% done, 20% in_progress, 20% open)
-- **20 votes** clustered on tooling blockers to make vote-weighted ordering visible
+- **18 votes** clustered on tooling blockers to make vote-weighted ordering visible
+- **6 comments** on key feedback items to demonstrate threaded discussion
 
 ---
 
@@ -108,7 +111,7 @@ Stored in `queries.sql` (standalone) and `src/lib/queries.ts` (rendered on `/ins
 
 ```
 prisma/
-  schema.prisma            # 6-table data model
+  schema.prisma            # 7-table data model
   seed.ts                  # Deterministic seed data
   migrations/              # SQLite migration
 queries.sql                # 3 standalone trend queries (run with sqlite3)
@@ -136,7 +139,7 @@ src/
 |---|---|---|
 | `GET /` | Server Component | Dashboard: boards grouped by team with status chips |
 | `GET /boards/new` | Server Component | Create-board form (team, title, release_tag, type, date, facilitator) |
-| `GET /boards/[id]` | Server Component | Board view with 3 feedback columns + vote buttons + action items table |
+| `GET /boards/[id]` | Server Component | Board view with 2 feedback columns (Went Well / To Improve) + comments + vote buttons + action items table |
 | `GET /insights` | Server Component | Renders all 3 trend queries as tables |
 | `GET /api/users` | Route Handler | JSON list of users for the ActingAsDropdown |
 
@@ -144,6 +147,7 @@ src/
 - `addFeedback` — creates feedback item, calls `classifyTheme` for ai_theme
 - `toggleVote` — insert or delete vote (unique constraint enforced)
 - `addAction` — creates action item with owner and optional due date
+- `addComment` — adds a comment to a feedback item
 - `cycleStatus` — cycles action: open → in_progress → done → open; sets `completedAt` when done
 
 ---
@@ -164,12 +168,13 @@ fix: prevent duplicate votes per user per feedback item
 
 1. Open http://localhost:3000 — dashboard shows 4 seeded boards across 3 teams
 2. Pick a user in the "Acting as" dropdown
-3. Click into a board — see 3 feedback columns with existing items and vote counts
-4. Add a "Went Well" and a "Didn't Go Well" item — ai_theme auto-classified (if API key set)
-5. Upvote a feedback item — vote count increments, filled arrow appears
-6. Add an action item with owner and due date, cycle its status to "done"
-7. Navigate to `/insights` — all 3 query tables populated with meaningful aggregates
-8. Run `sqlite3 dev.db < queries.sql` from CLI — same results, proving queries are standalone
+3. Click into a board — see 2 feedback columns (Went Well / To Improve) with existing items, vote counts, and comments
+4. Add a "Went Well" and a "To Improve" item — ai_theme auto-classified (if API key set)
+5. Add a comment on a feedback item — see threaded discussion
+6. Upvote a feedback item — vote count increments, filled arrow appears
+7. Add an action item with owner and due date, cycle its status to "done"
+8. Navigate to `/insights` — all 3 query tables populated with meaningful aggregates
+9. Run `sqlite3 dev.db < queries.sql` from CLI — same results, proving queries are standalone
 
 ---
 

@@ -30,6 +30,7 @@ model User {
   feedbackItems FeedbackItem[]
   actionItems   ActionItem[]
   votes         Vote[]
+  comments      Comment[]
 
   @@map("users")
 }
@@ -62,6 +63,7 @@ model FeedbackItem {
   board     RetroBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
   author    User       @relation(fields: [authorId], references: [id])
   votes     Vote[]
+  comments  Comment[]
 
   @@map("feedback_items")
 }
@@ -90,4 +92,16 @@ model Vote {
 
   @@unique([feedbackId, userId])
   @@map("votes")
+}
+
+model Comment {
+  id         String       @id @default(uuid())
+  feedbackId String       @map("feedback_id")
+  authorId   String       @map("author_id")
+  content    String
+  createdAt  DateTime     @default(now()) @map("created_at")
+  feedback   FeedbackItem @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  author     User         @relation(fields: [authorId], references: [id])
+
+  @@map("comments")
 }

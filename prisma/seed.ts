@@ -129,8 +129,6 @@ async function main() {
     prisma.feedbackItem.create({ data: { id: "f-0020", boardId: board4.id, authorId: cara.id, category: "went_well", content: "Runbook was accurate and up to date", aiTheme: "quality" } }),
     prisma.feedbackItem.create({ data: { id: "f-0021", boardId: board4.id, authorId: alice.id, category: "didnt_go_well", content: "Alert fatigue — too many noisy alerts delayed triage", aiTheme: "tooling" } }),
     prisma.feedbackItem.create({ data: { id: "f-0022", boardId: board4.id, authorId: bob.id, category: "didnt_go_well", content: "No automated rollback; had to do it manually", aiTheme: "tooling" } }),
-    prisma.feedbackItem.create({ data: { id: "f-0023", boardId: board4.id, authorId: cara.id, category: "idea", content: "Add canary deployments to prevent full rollouts of bad builds", aiTheme: "process" } }),
-    prisma.feedbackItem.create({ data: { id: "f-0024", boardId: board4.id, authorId: alice.id, category: "idea", content: "Create a dedicated incident Slack channel template", aiTheme: "communication" } }),
   ]);
 
   // --- Action Items ---
@@ -179,11 +177,19 @@ async function main() {
     prisma.vote.create({ data: { id: "v-0016", feedbackId: "f-0007", userId: frank.id } }), // monitoring
     prisma.vote.create({ data: { id: "v-0017", feedbackId: "f-0013", userId: iris.id } }),  // conversion
     prisma.vote.create({ data: { id: "v-0018", feedbackId: "f-0019", userId: alice.id } }), // fast hotfix
-    prisma.vote.create({ data: { id: "v-0019", feedbackId: "f-0023", userId: bob.id } }),   // canary idea
-    prisma.vote.create({ data: { id: "v-0020", feedbackId: "f-0023", userId: alice.id } }),
   ]);
 
-  console.log("Seed complete: 3 teams, 9 users, 4 boards, 24 feedback items, 10 action items, 20 votes");
+  // --- Comments ---
+  await Promise.all([
+    prisma.comment.create({ data: { id: "c-0001", feedbackId: "f-0004", authorId: alice.id, content: "This blocked the whole team for 2 days — we need a fix before next sprint" } }),
+    prisma.comment.create({ data: { id: "c-0002", feedbackId: "f-0004", authorId: cara.id, content: "Agreed. Bob is already working on quarantining the flaky ones" } }),
+    prisma.comment.create({ data: { id: "c-0003", feedbackId: "f-0010", authorId: dan.id, content: "Can we split the monorepo build into parallel jobs?" } }),
+    prisma.comment.create({ data: { id: "c-0004", feedbackId: "f-0016", authorId: gina.id, content: "Hiro added a health-check cron job — should prevent this recurring" } }),
+    prisma.comment.create({ data: { id: "c-0005", feedbackId: "f-0021", authorId: bob.id, content: "I counted 47 alerts in one hour during the incident. Most were noise." } }),
+    prisma.comment.create({ data: { id: "c-0006", feedbackId: "f-0002", authorId: bob.id, content: "The pairing sessions with Griffin were especially productive" } }),
+  ]);
+
+  console.log("Seed complete: 3 teams, 9 users, 4 boards, 22 feedback items, 10 action items, 18 votes, 6 comments");
 }
 
 main()
