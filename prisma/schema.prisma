@@ -1,0 +1,93 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Team {
+  id        String       @id @default(uuid())
+  name      String
+  squadType String       @map("squad_type")
+  createdAt DateTime     @default(now()) @map("created_at")
+  users     User[]
+  boards    RetroBoard[]
+
+  @@map("teams")
+}
+
+model User {
+  id            String         @id @default(uuid())
+  teamId        String         @map("team_id")
+  name          String
+  email         String         @unique
+  role          String
+  createdAt     DateTime       @default(now()) @map("created_at")
+  team          Team           @relation(fields: [teamId], references: [id])
+  facilitated   RetroBoard[]   @relation("Facilitator")
+  feedbackItems FeedbackItem[]
+  actionItems   ActionItem[]
+  votes         Vote[]
+
+  @@map("users")
+}
+
+model RetroBoard {
+  id            String         @id @default(uuid())
+  teamId        String         @map("team_id")
+  facilitatorId String         @map("facilitator_id")
+  title         String
+  releaseTag    String         @map("release_tag")
+  retroType     String         @map("retro_type")
+  sessionDate   DateTime       @map("session_date")
+  status        String
+  team          Team           @relation(fields: [teamId], references: [id])
+  facilitator   User           @relation("Facilitator", fields: [facilitatorId], references: [id])
+  feedbackItems FeedbackItem[]
+  actionItems   ActionItem[]
+
+  @@map("retro_boards")
+}
+
+model FeedbackItem {
+  id        String     @id @default(uuid())
+  boardId   String     @map("board_id")
+  authorId  String     @map("author_id")
+  category  String
+  content   String
+  aiTheme   String?    @map("ai_theme")
+  createdAt DateTime   @default(now()) @map("created_at")
+  board     RetroBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  author    User       @relation(fields: [authorId], references: [id])
+  votes     Vote[]
+
+  @@map("feedback_items")
+}
+
+model ActionItem {
+  id          String    @id @default(uuid())
+  boardId     String    @map("board_id")
+  ownerId     String    @map("owner_id")
+  description String
+  status      String    @default("open")
+  dueDate     DateTime? @map("due_date")
+  completedAt DateTime? @map("completed_at")
+  board       RetroBoard @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  owner       User       @relation(fields: [ownerId], references: [id])
+
+  @@map("action_items")
+}
+
+model Vote {
+  id         String       @id @default(uuid())
+  feedbackId String       @map("feedback_id")
+  userId     String       @map("user_id")
+  createdAt  DateTime     @default(now()) @map("created_at")
+  feedback   FeedbackItem @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id])
+
+  @@unique([feedbackId, userId])
+  @@map("votes")
+}
